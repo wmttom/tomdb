@@ -15,14 +15,14 @@ Getting Started
 
 create connection
 
-`
+``
 import tomdb
 db = tomdb.Connection("localhost", "database", "user", "passwd")
-`
+``
 get a table-cell from database.if the result more than one,raise erroe.
 
-`
+``
 >>>cell = db.one("SELECT id FROM table WHERE id=1")
 >>>print cell
 $ 1
-`
+``
