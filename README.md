@@ -3,7 +3,7 @@ tomdb
 
 A simple wrapper around MySQLdb.  
 tomdb是MySQLdb的简单封装,方便获得各种类型的数据结构结果集.  
-是不使用ORM场合中，非常轻量、方便的数据库访问方式.
+是不使用ORM场合中，非常轻量、方便的数据库访问方式.  
 fork自tornado的db模块,在原有基础上加入了事务autocommit选项和commit(),加入了one,onelist,oneset等方法方便使用.
 
 Installation
