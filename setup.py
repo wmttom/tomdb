@@ -1,6 +1,6 @@
 import distutils.core
 
-version = "0.2"
+version = "0.2.1"
 
 distutils.core.setup(
     name="tomdb",
