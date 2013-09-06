@@ -17,9 +17,10 @@ Getting Started
 =====
 创建一个数据库连接,最后的布尔类型参数为事务是否自动提交,不显示指定False默认为True.  
 create connection,the last boole argument means autocommit.
+加入客户端连接字符集参数,不指定默认为utf8,使用utf8mb4字符集时请确定mysql客户端库版本高于5.5
 ```python
 import tomdb
-db = tomdb.Connection("localhost", "database", "user", "passwd", True)
+db = tomdb.Connection("localhost", "database", "user", "passwd", True, use_charset='utf8mb4')
 ```
 提交事务,在自动提交为False时使用.  
 commit transaction , if autocommit = False
