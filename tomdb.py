@@ -20,8 +20,8 @@ except ImportError:
         raise
 
 
-version = "0.2"
-version_info = (0, 2, 0, 0)
+version = "0.2.1"
+version_info = (0, 2, 1, 0)
 
 class Connection(object):
     """A lightweight wrapper around MySQLdb DB-API connections.
@@ -40,14 +40,14 @@ class Connection(object):
     UTF-8 on all connections to avoid time zone and encoding errors.
     """
     def __init__(self, host, database, user=None, password=None, auto_commit=True,
-                 max_idle_time=7 * 3600, connect_timeout=0,
+                 use_charset='utf8',max_idle_time=7 * 3600, connect_timeout=0,
                  time_zone="+0:00"):
         self.host = host
         self.database = database
         self.max_idle_time = float(max_idle_time)
         self.auto_commit = auto_commit
 
-        args = dict(conv=CONVERSIONS, use_unicode=True, charset="utf8mb4",
+        args = dict(conv=CONVERSIONS, use_unicode=True, charset=use_charset,
                     db=database, init_command=('SET time_zone = "%s"' % time_zone),
                     connect_timeout=connect_timeout, sql_mode="TRADITIONAL")
         if user is not None:
