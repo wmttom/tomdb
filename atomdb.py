@@ -1,24 +1,8 @@
-"""A async-lightweight wrapper around MySQLdb fork torndb"""
-
 from __future__ import absolute_import, division, with_statement
 
-import copy
-import itertools
 import logging
-import os
 import time
-
-try:
-    import MySQLdb.constants
-    import MySQLdb.converters
-    import MySQLdb.cursors
-except ImportError:
-    # If MySQLdb isn't available this module won't actually be useable,
-    if 'READTHEDOCS' in os.environ:
-        MySQLdb = None
-    else:
-        raise
-
+import pymysql
 
 version = "0.5.1"
 version_info = (0, 5, 1, 0)
@@ -26,51 +10,20 @@ version_info = (0, 5, 1, 0)
 
 class Connection(object):
 
-    """A lightweight wrapper around MySQLdb DB-API connections.
-
-    The main value we provide is wrapping rows in a dict/object so that
-    columns can be accessed by name. Typical usage::
-
-        db = database.Connection("localhost", "mydatabase")
-        for article in db.query("SELECT * FROM articles"):
-            print article.title
-
-    Cursors are hidden by the implementation, but other than that, the methods
-    are very similar to the DB-API.
-
-    We explicitly set the timezone to UTC and the character encoding to
-    UTF-8 on all connections to avoid time zone and encoding errors.
-    """
-
     def __init__(
         self, host, database, user=None, password=None, auto_commit=True,
-        use_charset='utf8', max_idle_time=7 * 3600, connect_timeout=0):
+        use_charset='utf8', max_idle_time=7 * 3600, connect_timeout=None,
+        use_unicode=True, port=3306):
         self.host = host
         self.database = database
         self.max_idle_time = float(max_idle_time)
-        self.auto_commit = auto_commit
 
-        args = dict(conv=CONVERSIONS, use_unicode=True, charset=use_charset,
-                    db=database,
-                    # init_command="",
-                    connect_timeout=connect_timeout, sql_mode="TRADITIONAL")
-        if user is not None:
-            args["user"] = user
-        if password is not None:
-            args["passwd"] = password
-
-        # We accept a path to a MySQL socket file or a host(:port) string
-        if "/" in host:
-            args["unix_socket"] = host
-        else:
-            self.socket = None
-            pair = host.split(":")
-            if len(pair) == 2:
-                args["host"] = pair[0]
-                args["port"] = int(pair[1])
-            else:
-                args["host"] = host
-                args["port"] = 3306
+        args = dict(
+            host=host, use_unicode=use_unicode, charset=use_charset, user=user,
+            database=database,
+            # init_command="",
+            connect_timeout=connect_timeout, sql_mode="TRADITIONAL", passwd=password,
+            autocommit=auto_commit, port=port,)
 
         self._db = None
         self._db_args = args
@@ -97,20 +50,30 @@ class Connection(object):
     def reconnect(self):
         """Closes the existing database connection and re-opens it."""
         self.close()
-        self._db = MySQLdb.connect(**self._db_args)
-        self._db.autocommit(self.auto_commit)
+        self._db = pymysql.connect(**self._db_args)
+        # print self._db_args
 
     def iter(self, query, *parameters, **kwparameters):
         """Returns an iterator for the given query and parameters."""
         self._ensure_connected()
-        cursor = MySQLdb.cursors.SSCursor(self._db)
+        cursor = pymysql.cursors.SSCursor(self._db)
         try:
             self._execute(cursor, query, parameters, kwparameters)
             column_names = [d[0] for d in cursor.description]
             for row in cursor:
-                yield Row(zip(column_names, row))
+                yield dict(zip(column_names, row))
         finally:
             cursor.close()
+
+    def get(self, query, *parameters, **kwparameters):
+        """Returns the first row returned for the given query."""
+        rows = self.query(query, *parameters, **kwparameters)
+        if not rows:
+            return None
+        elif len(rows) > 1:
+            raise Exception("Multiple rows returned for Database.get() query")
+        else:
+            return rows[0]
 
     def query(self, query, *parameters, **kwparameters):
         """Returns a row list for the given query and parameters."""
@@ -118,7 +81,7 @@ class Connection(object):
         try:
             self._execute(cursor, query, parameters, kwparameters)
             column_names = [d[0] for d in cursor.description]
-            return [Row(itertools.izip(column_names, row)) for row in cursor]
+            return [dict(zip(column_names, row)) for row in cursor]
         finally:
             cursor.close()
 
@@ -154,16 +117,6 @@ class Connection(object):
             return rows[0]
         else:
             raise Exception("Multiple rows returned for Database.one() query")
-
-    def get(self, query, *parameters, **kwparameters):
-        """Returns the first row returned for the given query."""
-        rows = self.query(query, *parameters, **kwparameters)
-        if not rows:
-            return None
-        elif len(rows) > 1:
-            raise Exception("Multiple rows returned for Database.get() query")
-        else:
-            return rows[0]
 
     # rowcount is a more reasonable default return value than lastrowid,
     # but for historical compatibility execute() must return lastrowid.
@@ -208,35 +161,6 @@ class Connection(object):
         finally:
             cursor.close()
 
-    def executemany_rowcount(self, query, parameters):
-        """Executes the given query against all the given param sequences.
-
-        We return the rowcount from the query.
-        """
-        cursor = self._cursor()
-        try:
-            cursor.executemany(query, parameters)
-            return cursor.rowcount
-        finally:
-            cursor.close()
-
-    update = execute_rowcount
-    updatemany = executemany_rowcount
-
-    insert = execute_lastrowid
-    insertmany = executemany_lastrowid
-
-    def _ensure_connected(self):
-        # Mysql by default closes client connections that are idle for
-        # 8 hours, but the client library does not report this fact until
-        # you try to perform a query and it fails.  Protect against this
-        # case by preemptively closing and reopening the connection
-        # if it has been idle for too long (7 hours by default).
-        if (self._db is None or
-            (time.time() - self._last_use_time > self.max_idle_time)):
-            self.reconnect()
-        self._last_use_time = time.time()
-
     def _cursor(self):
         self._ensure_connected()
         return self._db.cursor()
@@ -244,36 +168,13 @@ class Connection(object):
     def _execute(self, cursor, query, parameters, kwparameters):
         try:
             return cursor.execute(query, kwparameters or parameters)
-        except OperationalError:
+        except pymysql.OperationalError:
             logging.error("Error connecting to MySQL on %s", self.host)
             self.close()
             raise
 
-
-class Row(dict):
-
-    """A dict that allows for object-like property access syntax."""
-
-    def __getattr__(self, name):
-        try:
-            return self[name]
-        except KeyError:
-            raise AttributeError(name)
-
-if MySQLdb is not None:
-    # Fix the access conversions to properly recognize unicode/binary
-    FIELD_TYPE = MySQLdb.constants.FIELD_TYPE
-    FLAG = MySQLdb.constants.FLAG
-    CONVERSIONS = copy.copy(MySQLdb.converters.conversions)
-
-    field_types = [FIELD_TYPE.BLOB, FIELD_TYPE.STRING, FIELD_TYPE.VAR_STRING]
-    if 'VARCHAR' in vars(FIELD_TYPE):
-        field_types.append(FIELD_TYPE.VARCHAR)
-
-    for field_type in field_types:
-        CONVERSIONS[field_type] = [
-            (FLAG.BINARY, str)] + CONVERSIONS[field_type]
-
-    # Alias some common MySQL exceptions
-    IntegrityError = MySQLdb.IntegrityError
-    OperationalError = MySQLdb.OperationalError
+    def _ensure_connected(self):
+        if (self._db is None or
+            (time.time() - self._last_use_time > self.max_idle_time)):
+            self.reconnect()
+        self._last_use_time = time.time()
